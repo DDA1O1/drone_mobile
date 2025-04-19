@@ -1,104 +1,129 @@
+# .github/workflows/android-release.yml
+
 name: Android Release Build
 
 on:
-  # Allows manual triggering from the Actions tab
+  # Allows manual triggering from the Actions tab in GitHub
   workflow_dispatch:
 
-  # Automatically trigger on pushing tags matching v*.*.* (e.g., v1.0.0)
+  # Automatically trigger on pushing tags matching v*.*.* (e.g., v1.0.0, v2.1.3)
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*.*.*' # Trigger on version tags
 
 jobs:
   build-android:
     name: Build Signed Android Release APK
-    runs-on: ubuntu-latest # Use a Linux runner
+    # Use the latest Ubuntu runner provided by GitHub
+    runs-on: ubuntu-latest
 
+    # Define environment variables accessible to all steps in this job
     env:
       # Set environment variables from secrets for build.gradle
+      # Ensure you have created these secrets in your repository:
+      # Settings > Secrets and variables > Actions > Repository secrets
       ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      # Define the path where the keystore will be decoded
+      # Define the path where the keystore file will be placed after decoding
       ANDROID_RELEASE_KEYSTORE_PATH: ${{ github.workspace }}/android/app/release.keystore
 
     steps:
+      # Step 1: Check out the repository code
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # Step 2: Set up the Java Development Kit (JDK)
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17' # Match the version needed by your project/React Native version
-          distribution: 'temurin' # A popular OpenJDK distribution
+          # Specify the Java version required by your React Native / Android build
+          java-version: '17' # Common requirement, adjust if needed (e.g., '11', '21')
+          # Specify the JDK distribution
+          distribution: 'temurin' # Eclipse Temurin is a popular OpenJDK distribution
+          # Enable caching for Gradle dependencies to speed up builds
           cache: 'gradle'
 
+      # Step 3: Set up Node.js environment
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 'lts' # Or '20', 'lts', match your project needs
-          cache: 'npm' # Or 'yarn' if you use Yarn
+          # Specify the Node.js version matching your project requirements
+          node-version: '18' # Or '20', 'lts', etc.
+          # Enable caching for npm packages
+          cache: 'npm' # Use 'yarn' if your project uses Yarn
 
+      # Step 4: Install project's JavaScript dependencies
       - name: Install JavaScript Dependencies
-        run: npm ci # 'npm ci' is generally preferred in CI for reproducibility using package-lock.json
-        # Or: yarn install --frozen-lockfile
+        # 'npm ci' is recommended for CI as it uses package-lock.json for deterministic installs
+        run: npm ci
+        # If using Yarn: run: yarn install --frozen-lockfile
 
-      # --- Android SDK Setup ---
-      # Using a dedicated action is often simpler than replicating the Codespaces script
+      # Step 5: Set up the Android SDK environment
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-        # This action sets up SDK, NDK, Build Tools, etc.
-        # It automatically sets ANDROID_SDK_ROOT environment variable.
+        # This action installs the Android SDK, NDK, build-tools, platform-tools, etc.
+        # It automatically sets necessary environment variables like ANDROID_SDK_ROOT.
 
-      # --- Handle Signing Keystore ---
+      # Step 6: Decode the Base64 encoded keystore file from secrets
       - name: Decode Keystore
-        # Check if the secret exists before attempting to decode
-        if: secrets.ANDROID_RELEASE_KEYSTORE_BASE64 != ''
+        # **CORRECTED LINE:** Ensure the 'if' condition uses the expression syntax `${{ ... }}`
+        # This step only runs if the secret actually contains a value.
+        if: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 != '' }}
         run: |
-          echo "Decoding keystore..."
-          # Ensure the target directory exists
+          echo "Decoding keystore from ANDROID_RELEASE_KEYSTORE_BASE64 secret..."
+          # Ensure the target directory exists (android/app)
           mkdir -p android/app
-          # Decode the base64 secret into the file path defined by ANDROID_RELEASE_KEYSTORE_PATH
+          # Decode the base64 secret and write it to the path defined by ANDROID_RELEASE_KEYSTORE_PATH
           echo "${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > ${{ env.ANDROID_RELEASE_KEYSTORE_PATH }}
           echo "Keystore decoded successfully to ${{ env.ANDROID_RELEASE_KEYSTORE_PATH }}"
-        # Optional: Add error handling if the secret is empty but required
-        # else:
-        #  echo "::error::ANDROID_RELEASE_KEYSTORE_BASE64 secret is not set!"
-        #  exit 1
+      # Note: If the secret is mandatory for your release build, you might want to add
+      # a check here or in the build step to fail the workflow if the keystore is missing.
 
-      # --- Build Release APK ---
+      # Step 7: Make the Gradle wrapper script executable
       - name: Make gradlew executable
         run: chmod +x ./android/gradlew
 
+      # Step 8: Build the signed release APK using Gradle
       - name: Build Release APK
-        working-directory: ./android # Run gradle from the android directory
+        # Execute Gradle commands from the 'android' directory
+        working-directory: ./android
+        # Run clean to remove previous build outputs, then assembleRelease
         run: ./gradlew clean assembleRelease
-        # Optional: Add --no-daemon for potentially cleaner CI runs
+        # Optional: Consider adding --no-daemon for potentially cleaner CI runs,
+        # although it might slightly increase build time.
         # run: ./gradlew clean assembleRelease --no-daemon
 
-      # --- Upload Artifact ---
+      # Step 9: Upload the generated APK(s) as a build artifact
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-apks # Name of the artifact zip file
-          path: | # Paths to include in the artifact
+          # Name of the artifact package that will be created
+          name: release-apks
+          # Specify the path(s) to the files to include in the artifact.
+          # This wildcard will capture the universal APK and any ABI split APKs.
+          path: |
             android/app/build/outputs/apk/release/*.apk
-          retention-days: 7 # Optional: How long to keep the artifact
+          # Optional: How long to keep the artifact (default is 90 days, min 1)
+          retention-days: 7
 
-      # --- Create GitHub Release (Optional - only runs on tag push) ---
+      # Step 10: Create a GitHub Release and attach the APK(s) (Optional - only runs on tag push)
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/') # Only run this step if triggered by a tag
+        # This step only runs if the workflow was triggered by pushing a tag
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          # Use the tag name for the release name and tag
+          # Use the tag name (e.g., "v1.0.0") for the release tag and name
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
-          # Optional: Set to true to create a draft release
+          # Set draft: true to create a draft release instead of publishing immediately
           # draft: false
-          # Optional: Set to true to mark as pre-release
+          # Set prerelease: true to mark the release as a pre-release
           # prerelease: false
-          # Upload all APKs found in the release output directory
+          # Specify the files to upload to the release assets section
           files: |
             android/app/build/outputs/apk/release/*.apk
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Required for creating releases
+          # The GITHUB_TOKEN is automatically provided by GitHub Actions
+          # and is required by the action to create a release.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

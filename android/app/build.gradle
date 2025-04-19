@@ -72,11 +72,11 @@ def enableProguardInReleaseBuilds = true
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
-def keystorePropertiesFile = rootProject.file("app/keystore.properties")
-def keystoreProperties = new Properties()
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-}
+// def keystorePropertiesFile = rootProject.file("app/keystore.properties")
+// def keystoreProperties = new Properties()
+// if (keystorePropertiesFile.exists()) {
+//     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+// }
 
 android {
     ndkVersion rootProject.ext.ndkVersion
@@ -99,10 +99,22 @@ android {
             keyPassword 'android'
         }
         release {
-            storeFile file(keystoreProperties['storeFile'])
-            storePassword keystoreProperties['storePassword']
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
+            // Read signing configuration from environment variables
+            // Set by GitHub Actions secrets
+            if (System.getenv("ANDROID_RELEASE_KEYSTORE_PATH") != null &&
+                System.getenv("ANDROID_STORE_PASSWORD") != null &&
+                System.getenv("ANDROID_KEY_ALIAS") != null &&
+                System.getenv("ANDROID_KEY_PASSWORD") != null) {
+
+                storeFile file(System.getenv("ANDROID_RELEASE_KEYSTORE_PATH")) // We'll set this path in the workflow
+                storePassword System.getenv("ANDROID_STORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            } else {
+                println("Warning: Release signing environment variables not fully set. Release signing disabled.")
+                // Optionally disable release signing or throw an error if variables aren't set
+                // signingConfig null
+            }
         }
     }
     splits {
@@ -120,7 +132,7 @@ android {
         release {
             // Caution! In production, you need to generate your own keystore file.
             // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"

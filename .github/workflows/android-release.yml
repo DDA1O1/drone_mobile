@@ -75,7 +75,7 @@ jobs:
         # ================== CRITICAL LINE ==================
         # The 'if' condition MUST be wrapped in ${{ }} expression syntax.
         # This step only runs if the secret ANDROID_RELEASE_KEYSTORE_BASE64 is not empty.
-        if: env.ANDROID_RELEASE_KEYSTORE_BASE64 != null
+        if: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 != '' }}
         # ===================================================
         run: |
           echo "Decoding keystore from ANDROID_RELEASE_KEYSTORE_BASE64 secret..."

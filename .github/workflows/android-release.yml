@@ -1,0 +1,113 @@
+# .github/workflows/android-release.yml
+
+name: Android Release Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-android:
+    name: Build Signed Android Release APK
+    runs-on: ubuntu-latest
+
+    # Define environment variables accessible to all steps in this job
+    env:
+      # Standard signing credentials from secrets
+      ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      ANDROID_RELEASE_KEYSTORE_PATH: ${{ github.workspace }}/android/app/release.keystore
+
+      # === WORKAROUND APPLIED HERE ===
+      # Set an intermediate environment variable based on secret presence.
+      # This expression evaluates to true/false, which becomes 'true'/'false' string in env.
+      KEYSTORE_SECRET_IS_SET: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 != '' }}
+      # ===============================
+
+    steps:
+      # Step 1: Checkout Repository
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Step 2: Set up JDK 17
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      # Step 3: Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm' # Use 'yarn' if your project uses Yarn
+
+      # Step 4: Install JavaScript Dependencies
+      - name: Install JavaScript Dependencies
+        run: npm ci # Or: yarn install --frozen-lockfile
+
+      # Step 5: Setup Android SDK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # Step 6: Decode Keystore (Conditional Step)
+      - name: Decode Keystore
+        # === WORKAROUND APPLIED HERE ===
+        # Check the intermediate environment variable set at the job level.
+        # Compare against the string 'true'.
+        if: env.KEYSTORE_SECRET_IS_SET == 'true'
+        # ===============================
+        run: |
+          echo "KEYSTORE_SECRET_IS_SET is true. Decoding keystore..."
+          mkdir -p android/app
+          echo "${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > ${{ env.ANDROID_RELEASE_KEYSTORE_PATH }}
+          echo "Keystore decoded successfully to ${{ env.ANDROID_RELEASE_KEYSTORE_PATH }}"
+          if [ ! -f "${{ env.ANDROID_RELEASE_KEYSTORE_PATH }}" ]; then
+            echo "::error::Keystore file was not created after decoding!"
+            exit 1
+          fi
+          ls -l ${{ env.ANDROID_RELEASE_KEYSTORE_PATH }}
+
+      # Step 6b: Handle missing keystore (Optional but recommended)
+      - name: Handle Missing Keystore Secret
+        # Run this step if the intermediate env var is 'false'
+        if: env.KEYSTORE_SECRET_IS_SET == 'false'
+        run: |
+          echo "::error::Required secret ANDROID_RELEASE_KEYSTORE_BASE64 is not set or is empty. Cannot sign the release build."
+          exit 1 # Fail the workflow explicitly
+
+      # Step 7: Make gradlew executable
+      - name: Make gradlew executable
+        run: chmod +x ./android/gradlew
+
+      # Step 8: Build Release APK
+      - name: Build Release APK
+        working-directory: ./android
+        run: ./gradlew clean assembleRelease
+        # Add --no-daemon if needed: ./gradlew clean assembleRelease --no-daemon
+
+      # Step 9: Upload Release APK Artifact
+      - name: Upload Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apks
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+          retention-days: 7
+
+      # Step 10: Create GitHub Release (Only runs on tag push)
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          files: |
+            android/app/build/outputs/apk/release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

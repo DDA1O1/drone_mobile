@@ -44,7 +44,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: 'lts'
           cache: 'npm' # Use 'yarn' if your project uses Yarn
 
       # Step 4: Install JavaScript Dependencies

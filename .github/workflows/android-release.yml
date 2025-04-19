@@ -13,6 +13,11 @@ jobs:
     name: Build Signed Android Release APK
     runs-on: ubuntu-latest
 
+
+    permissions:
+      contents: write 
+
+      
     # Define environment variables accessible to all steps in this job
     env:
       # Standard signing credentials from secrets
